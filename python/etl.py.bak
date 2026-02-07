@@ -1,0 +1,92 @@
+# python/etl.py
+# Robust ETL: load raw CSV, clean columns, generate synthetic features, and write customer_agg.csv
+import pandas as pd
+import numpy as np
+import os
+import sys
+import subprocess
+
+RAW = "data/raw/german_credit_data.csv"
+OUT = "data/customer_agg.csv"
+CREATE_TARGET = False   # set True for demo with synthetic target; False for real datasets
+
+os.makedirs("data", exist_ok=True)
+os.makedirs("reports", exist_ok=True)
+
+# --- Load with friendly error if missing ---
+try:
+    df = pd.read_csv(RAW, header=0, index_col=0)
+except FileNotFoundError:
+    raise FileNotFoundError(f"Raw file not found: {RAW}. Place the dataset at this path and retry.")
+
+# --- Normalize column names first ---
+df = df.rename(columns=lambda c: c.strip().replace(" ", "_").replace("/", "_").lower())
+
+# --- Input validation: check required columns (normalized names) ---
+required = ["age", "credit_amount"]
+for c in required:
+    if c not in df.columns:
+        raise ValueError(f"Missing required column '{c}' in raw data. Check {RAW}")
+
+# --- Coerce numeric columns and check for NA after coercion ---
+df["credit_amount"] = pd.to_numeric(df["credit_amount"], errors="coerce")
+df["age"] = pd.to_numeric(df["age"], errors="coerce")
+
+if df[["age", "credit_amount"]].isnull().any().any():
+    # give a helpful message including counts
+    n_na_age = df["age"].isnull().sum()
+    n_na_credit = df["credit_amount"].isnull().sum()
+    raise ValueError(f"Found NA after coercion: age NA={n_na_age}, credit_amount NA={n_na_credit}. Fix source data or adjust parsing.")
+
+# --- Basic sanity checks ---
+if (df["credit_amount"] < 0).any():
+    raise ValueError("Found negative credit_amount values. Please check input data.")
+if (df["age"] <= 0).any() or (df["age"] > 120).any():
+    raise ValueError("Found unrealistic ages (<=0 or >120). Please check input data.")
+
+# --- Reset index and ensure a stable customer_id column name ---
+df.reset_index(inplace=True)
+# The reset index will have column name 'index' if original index had no name
+if "index" in df.columns:
+    df = df.rename(columns={"index": "customer_id"})
+elif "customer_id" not in df.columns:
+    # fallback: create customer_id from row number
+    df["customer_id"] = np.arange(1, len(df) + 1)
+
+# --- Synthetic features (simple, reproducible) ---
+rng = np.random.default_rng(seed=42)
+df["income"] = rng.integers(30000, 80001, size=len(df))
+df["credit_limit"] = df["credit_amount"] + 1000.0
+# avoid division by zero (though credit_limit > 0 because +1000)
+df["utilization"] = df["credit_amount"] / df["credit_limit"]
+df["n_prev_loans"] = 1  # single-table demo
+df["n_past_due"] = 0
+df["max_days_past_due"] = 0
+
+# --- Optionally create synthetic target (30% default rate) ---
+if CREATE_TARGET:
+    df["target_default"] = rng.binomial(1, 0.30, size=len(df))
+
+# --- Keep only numeric + customer_id + target_default (if present) ---
+cols_keep = ["customer_id", "age", "income", "credit_amount", "credit_limit",
+             "utilization", "n_prev_loans", "n_past_due", "max_days_past_due"]
+if "target_default" in df.columns:
+    cols_keep.append("target_default")
+
+df_out = df[cols_keep]
+df_out.to_csv(OUT, index=False)
+print(f"Wrote {OUT} with {len(df_out)} rows")
+
+# --- Capture reproducibility info: python version + pip freeze ---
+try:
+    pip_freeze = subprocess.check_output([sys.executable, "-m", "pip", "freeze"], text=True)
+    with open("reports/py_packages_freeze.txt", "w") as f:
+        f.write(f"Python version: {sys.version}\n\n")
+        f.write(pip_freeze)
+    print("Saved pip freeze to reports/py_packages_freeze.txt")
+except Exception as e:
+    # fallback to minimal info if pip freeze fails
+    with open("reports/py_packages_freeze.txt", "w") as f:
+        f.write(f"Python version: {sys.version}\n")
+        f.write(f"pip freeze failed: {e}\n")
+    print("Warning: pip freeze failed; wrote fallback info to reports/py_packages_freeze.txt")

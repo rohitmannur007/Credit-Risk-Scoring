@@ -1,0 +1,14 @@
+name: credit-scoring
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pandas
+  - numpy
+  - scikit-learn
+  - xgboost
+  - r-base=4.2
+  - r-data.table
+  - r-pROC
+  - r-xgboost
+  - sqlite

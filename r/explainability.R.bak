@@ -1,0 +1,35 @@
+# r/explainability.R
+# Run after credit_baseline.R
+install_if_missing <- function(pkgs){
+  new <- pkgs[!(pkgs %in% installed.packages()[,1])]
+  if(length(new)) install.packages(new, repos='https://cloud.r-project.org')
+}
+
+
+df <- fread("data/customer_agg.csv")
+meta <- readRDS("r/models/model_meta.rds")
+num_cols <- meta$num_cols
+
+# Load logistic
+log_mod <- readRDS("r/models/log_mod.rds")
+
+# Create explainer for logistic (DALEX)
+explainer_log <- DALEX::explain(model = log_mod,
+                                data = as.data.frame(df[, ..num_cols]),
+                                y = df$target_default,
+                                label = "Logistic")
+
+# Variable importance
+vi_log <- DALEX::model_parts(explainer_log)
+png("reports/vi_log.png", width = 800, height = 600)
+plot(vi_log)
+dev.off()
+
+set.seed(42)
+sample_idx <- sample(nrow(df), 20)
+X <- as.data.frame(df[, ..num_cols])
+pred_wrapper <- function(object, newdata) as.numeric(predict(object, newdata = newdata, type = "response"))
+# Save a summary plot (mean abs shap)
+png("reports/shap_summary.png", width = 900, height = 600)
+barplot(sort(colMeans(abs(shap_vals)), decreasing = TRUE)[1:20], las = 2, main = "SHAP (approx) - logistic")
+dev.off()

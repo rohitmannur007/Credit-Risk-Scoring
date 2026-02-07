@@ -1,0 +1,11 @@
+*.db
+__pycache__
+.Rhistory
+.RData
+r/models/*
+reports/*.png  # Uncomment if you want to commit plots
+data/customer_agg.csv  # Generated
+reports/predictions.csv
+monitoring/*
+reports/py_packages*
+reports/r_session_info.txt
